@@ -1,9 +1,22 @@
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from fastapi import FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api.v1.router import api_router
 from app.schemas.health import HealthResponse
+from app.core.database import engine, Base
+import app.models  # noqa: F401 — register all ORM models
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Create all database tables on startup using SQLAlchemy metadata."""
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+    await engine.dispose()
+
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -12,6 +25,7 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    lifespan=lifespan,
 )
 
 # Set up CORS middleware
