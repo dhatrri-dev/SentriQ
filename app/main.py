@@ -9,6 +9,11 @@ from app.core.database import engine, Base
 import app.models  # noqa: F401 — register all ORM models
 
 
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from app.schemas.common import ErrorDetail, ErrorResponse
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Create all database tables on startup using SQLAlchemy metadata."""
@@ -36,6 +41,32 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc: RequestValidationError):
+    """Custom exception handler to return structured, user-friendly 422 validation errors."""
+    formatted_errors = [
+        ErrorDetail(
+            loc=[str(loc_item) for loc_item in err.get("loc", [])],
+            msg=err.get("msg", "Invalid input field"),
+            type=err.get("type", "value_error")
+        )
+        for err in exc.errors()
+    ]
+    error_response = ErrorResponse(
+        error="Validation Error",
+        detail="One or more request payload fields failed validation.",
+        errors=formatted_errors
+    )
+    # Include standard FastAPI detail list for backward compatibility
+    res_content = error_response.model_dump()
+    res_content["detail"] = exc.errors()
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content=res_content
+    )
+
 
 
 @app.get(
