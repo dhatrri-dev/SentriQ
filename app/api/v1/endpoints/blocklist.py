@@ -1,23 +1,37 @@
 from datetime import datetime, timezone
 from typing import List
 from uuid import UUID, uuid4
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
+from app.models.blocklist import BlocklistEntity
 from app.schemas.blocklist import BlocklistCreate, BlocklistResponse
 from app.schemas.common import EntityTypeEnum, ErrorResponse
 
 router = APIRouter(prefix="/blocklist", tags=["Blocklist Management"])
 
-MOCK_BLOCKLIST = [
+DEFAULT_SEED_BLOCKLIST = [
     {
         "id": UUID("44444444-4444-4444-4444-444444444444"),
-        "entity_type": EntityTypeEnum.EMAIL_DOMAIN,
+        "entity_type": EntityTypeEnum.EMAIL_DOMAIN.value,
         "entity_value": "tempmail.com",
         "reason": "Disposable email provider used in card testing attacks.",
         "is_active": True,
-        "expires_at": None,
-        "created_at": datetime.now(timezone.utc),
     }
 ]
+
+
+async def _ensure_seed_blocklist(db: AsyncSession):
+    stmt = select(BlocklistEntity)
+    res = await db.execute(stmt)
+    items = res.scalars().all()
+    if not items:
+        for seed in DEFAULT_SEED_BLOCKLIST:
+            entity = BlocklistEntity(**seed)
+            db.add(entity)
+        await db.flush()
 
 
 @router.get(
@@ -26,8 +40,12 @@ MOCK_BLOCKLIST = [
     status_code=status.HTTP_200_OK,
     summary="List blocklist entries"
 )
-async def list_blocklist() -> List[BlocklistResponse]:
-    return [BlocklistResponse(**item) for item in MOCK_BLOCKLIST if item["is_active"]]
+async def list_blocklist(db: AsyncSession = Depends(get_db)) -> List[BlocklistResponse]:
+    await _ensure_seed_blocklist(db)
+    stmt = select(BlocklistEntity).where(BlocklistEntity.is_active == True)
+    result = await db.execute(stmt)
+    items = result.scalars().all()
+    return [BlocklistResponse.model_validate(item) for item in items]
 
 
 @router.post(
@@ -36,15 +54,22 @@ async def list_blocklist() -> List[BlocklistResponse]:
     status_code=status.HTTP_201_CREATED,
     summary="Add entity to blocklist"
 )
-async def add_to_blocklist(payload: BlocklistCreate) -> BlocklistResponse:
-    entry = {
-        "id": uuid4(),
-        **payload.model_dump(),
-        "is_active": True,
-        "created_at": datetime.now(timezone.utc)
-    }
-    MOCK_BLOCKLIST.append(entry)
-    return BlocklistResponse(**entry)
+async def add_to_blocklist(
+    payload: BlocklistCreate,
+    db: AsyncSession = Depends(get_db)
+) -> BlocklistResponse:
+    entity_type_str = payload.entity_type.value if hasattr(payload.entity_type, "value") else str(payload.entity_type)
+    entry = BlocklistEntity(
+        id=uuid4(),
+        entity_type=entity_type_str,
+        entity_value=payload.entity_value,
+        reason=payload.reason,
+        expires_at=payload.expires_at,
+        is_active=True
+    )
+    db.add(entry)
+    await db.flush()
+    return BlocklistResponse.model_validate(entry)
 
 
 @router.delete(
@@ -56,9 +81,17 @@ async def add_to_blocklist(payload: BlocklistCreate) -> BlocklistResponse:
     },
     summary="Remove entity from blocklist"
 )
-async def remove_from_blocklist(entry_id: UUID):
-    for entry in MOCK_BLOCKLIST:
-        if entry["id"] == entry_id:
-            entry["is_active"] = False
-            return None
-    raise HTTPException(status_code=404, detail=f"Blocklist entry {entry_id} not found")
+async def remove_from_blocklist(
+    entry_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    stmt = select(BlocklistEntity).where(BlocklistEntity.id == entry_id)
+    result = await db.execute(stmt)
+    entry = result.scalar_one_or_none()
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Blocklist entry {entry_id} not found")
+
+    entry.is_active = False
+    await db.flush()
+    return None
+
