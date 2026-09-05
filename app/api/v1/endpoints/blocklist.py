@@ -38,14 +38,45 @@ async def _ensure_seed_blocklist(db: AsyncSession):
     "",
     response_model=List[BlocklistResponse],
     status_code=status.HTTP_200_OK,
-    summary="List blocklist entries"
+    summary="List blocklist entries",
+    description="Returns all active blocklist entries sorted with stable ordering."
 )
 async def list_blocklist(db: AsyncSession = Depends(get_db)) -> List[BlocklistResponse]:
     await _ensure_seed_blocklist(db)
-    stmt = select(BlocklistEntity).where(BlocklistEntity.is_active == True)
+    stmt = select(BlocklistEntity).where(BlocklistEntity.is_active == True).order_by(BlocklistEntity.created_at.desc(), BlocklistEntity.id.desc())
     result = await db.execute(stmt)
     items = result.scalars().all()
     return [BlocklistResponse.model_validate(item) for item in items]
+
+
+@router.get(
+    "/{entry_id}",
+    response_model=BlocklistResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {"description": "Blocklist entry details found"},
+        404: {"model": ErrorResponse, "description": "Entry not found"},
+    },
+    summary="Get blocklist entry detail",
+    description="Retrieves a single blocklist entry by its unique ID."
+)
+async def get_blocklist_detail(
+    entry_id: UUID,
+    db: AsyncSession = Depends(get_db)
+) -> BlocklistResponse:
+    await _ensure_seed_blocklist(db)
+    stmt = select(BlocklistEntity).where(BlocklistEntity.id == entry_id)
+    result = await db.execute(stmt)
+    entry = result.scalar_one_or_none()
+
+    if not entry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Blocklist entry with ID {entry_id} not found"
+        )
+
+    return BlocklistResponse.model_validate(entry)
+
 
 
 @router.post(

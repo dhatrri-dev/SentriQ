@@ -62,14 +62,44 @@ async def _ensure_seed_rules(db: AsyncSession):
     response_model=List[RuleResponse],
     status_code=status.HTTP_200_OK,
     summary="List all risk rules",
-    description="Returns all active and inactive fraud evaluation rules."
+    description="Returns all active and inactive fraud evaluation rules sorted with stable ordering."
 )
 async def list_rules(db: AsyncSession = Depends(get_db)) -> List[RuleResponse]:
     await _ensure_seed_rules(db)
-    stmt = select(RiskRule)
+    stmt = select(RiskRule).order_by(RiskRule.created_at.desc(), RiskRule.id.desc())
     result = await db.execute(stmt)
     rules = result.scalars().all()
     return [RuleResponse.model_validate(rule) for rule in rules]
+
+
+@router.get(
+    "/{rule_id}",
+    response_model=RuleResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {"description": "Rule details found"},
+        404: {"model": ErrorResponse, "description": "Rule not found"},
+    },
+    summary="Get risk rule detail",
+    description="Retrieves a single risk rule by its unique ID."
+)
+async def get_rule_detail(
+    rule_id: UUID,
+    db: AsyncSession = Depends(get_db)
+) -> RuleResponse:
+    await _ensure_seed_rules(db)
+    stmt = select(RiskRule).where(RiskRule.id == rule_id)
+    result = await db.execute(stmt)
+    rule = result.scalar_one_or_none()
+
+    if not rule:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Rule with ID {rule_id} not found"
+        )
+
+    return RuleResponse.model_validate(rule)
+
 
 
 @router.post(
