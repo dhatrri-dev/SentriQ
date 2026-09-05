@@ -1,8 +1,9 @@
 from datetime import datetime, timezone
 import time
+from typing import Optional
 from uuid import UUID, uuid4
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -13,9 +14,11 @@ from app.models.case import InvestigationCase
 from app.models.blocklist import BlocklistEntity
 from app.models.rule import RiskRule
 from app.schemas.evaluation import RuleResultItem, TransactionEvaluationRequest, TransactionEvaluationResponse
-from app.schemas.common import CasePriorityEnum, CaseStatusEnum, DecisionEnum, ErrorResponse
+from app.schemas.transaction import LocationSchema, TransactionResponse
+from app.schemas.common import CasePriorityEnum, CaseStatusEnum, DecisionEnum, ErrorResponse, PaginatedResponse
 
 router = APIRouter(prefix="/transactions", tags=["Transactions & Evaluation"])
+
 
 
 @router.post(
@@ -186,4 +189,100 @@ async def evaluate_transaction(
         execution_time_ms=exec_time_ms,
         evaluated_at=eval_log.evaluated_at
     )
+
+
+def _map_transaction_response(tx: Transaction) -> TransactionResponse:
+    return TransactionResponse(
+        id=tx.id,
+        user_id=tx.user_id,
+        card_hash=tx.card_hash,
+        card_bin=tx.card_bin,
+        amount=float(tx.amount),
+        currency=tx.currency,
+        ip_address=tx.ip_address,
+        location=LocationSchema(
+            latitude=tx.latitude,
+            longitude=tx.longitude,
+            country=tx.country,
+            city=tx.city
+        ),
+        device_id=tx.device_id,
+        timestamp=tx.timestamp,
+        risk_score=tx.risk_score,
+        status=tx.status,
+        created_at=tx.created_at
+    )
+
+
+@router.get(
+    "",
+    response_model=PaginatedResponse[TransactionResponse],
+    status_code=status.HTTP_200_OK,
+    summary="List transactions (Paginated)",
+    description="Returns a paginated list of evaluated transactions sorted with stable ordering (newest first)."
+)
+async def list_transactions(
+    page: int = Query(default=1, ge=1, description="Page number"),
+    size: int = Query(default=20, ge=1, le=100, description="Page size limit"),
+    user_id: Optional[UUID] = Query(default=None, description="Filter by User ID"),
+    status_filter: Optional[str] = Query(default=None, alias="status", description="Filter by status (ALLOW, FLAGGED, BLOCK)"),
+    db: AsyncSession = Depends(get_db)
+) -> PaginatedResponse[TransactionResponse]:
+    from sqlalchemy import func
+    from app.schemas.common import PaginatedResponse
+
+    query = select(Transaction)
+    if user_id:
+        query = query.where(Transaction.user_id == user_id)
+    if status_filter:
+        query = query.where(Transaction.status == status_filter.upper())
+
+    # Stable ordering: newest timestamp first, tie breaker on unique primary key id
+    query = query.order_by(Transaction.timestamp.desc(), Transaction.id.desc())
+
+    # Count total matching
+    count_query = select(func.count()).select_from(query.subquery())
+    total_count = (await db.execute(count_query)).scalar() or 0
+
+    # Paginate
+    paginated_query = query.offset((page - 1) * size).limit(size)
+    result = await db.execute(paginated_query)
+    transactions = result.scalars().all()
+
+    items = [_map_transaction_response(tx) for tx in transactions]
+    return PaginatedResponse[TransactionResponse](
+        total=total_count,
+        page=page,
+        size=size,
+        items=items
+    )
+
+
+@router.get(
+    "/{transaction_id}",
+    response_model=TransactionResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {"description": "Transaction details found"},
+        404: {"model": ErrorResponse, "description": "Transaction not found"},
+    },
+    summary="Get transaction detail",
+    description="Retrieves a single transaction record by its unique ID."
+)
+async def get_transaction_detail(
+    transaction_id: UUID,
+    db: AsyncSession = Depends(get_db)
+) -> TransactionResponse:
+    stmt = select(Transaction).where(Transaction.id == transaction_id)
+    result = await db.execute(stmt)
+    transaction = result.scalar_one_or_none()
+
+    if not transaction:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Transaction with ID {transaction_id} not found"
+        )
+
+    return _map_transaction_response(transaction)
+
 
