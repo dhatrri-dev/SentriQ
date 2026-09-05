@@ -70,6 +70,49 @@ async def _ensure_seed_case(db: AsyncSession):
 
 
 @router.get(
+    "",
+    response_model=PaginatedResponse[CaseResponse],
+    status_code=status.HTTP_200_OK,
+    summary="List all investigation cases (Paginated)",
+    description="Returns paginated list of all investigation cases sorted with stable ordering (newest first)."
+)
+async def list_cases(
+    page: int = Query(default=1, ge=1, description="Page number"),
+    size: int = Query(default=20, ge=1, le=100, description="Page size limit"),
+    status_filter: Optional[CaseStatusEnum] = Query(default=None, alias="status", description="Filter by status"),
+    priority_filter: Optional[CasePriorityEnum] = Query(default=None, alias="priority", description="Filter by priority"),
+    db: AsyncSession = Depends(get_db)
+) -> PaginatedResponse[CaseResponse]:
+    await _ensure_seed_case(db)
+
+    query = select(InvestigationCase)
+    if status_filter:
+        query = query.where(InvestigationCase.status == status_filter.value)
+    if priority_filter:
+        query = query.where(InvestigationCase.priority == priority_filter.value)
+
+    # Stable ordering: newest created_at first, tie breaker on unique primary key id
+    query = query.order_by(InvestigationCase.created_at.desc(), InvestigationCase.id.desc())
+
+    # Count total matching
+    count_query = select(func.count()).select_from(query.subquery())
+    total_count = (await db.execute(count_query)).scalar() or 0
+
+    # Paginate
+    paginated_query = query.offset((page - 1) * size).limit(size)
+    result = await db.execute(paginated_query)
+    cases = result.scalars().all()
+
+    items = [CaseResponse.model_validate(c) for c in cases]
+    return PaginatedResponse[CaseResponse](
+        total=total_count,
+        page=page,
+        size=size,
+        items=items
+    )
+
+
+@router.get(
     "/pending",
     response_model=PaginatedResponse[CaseResponse],
     status_code=status.HTTP_200_OK,
@@ -88,13 +131,16 @@ async def list_pending_cases(
     if priority:
         query = query.where(InvestigationCase.priority == priority.value)
 
+    # Stable ordering: newest created_at first, tie breaker on unique primary key id
+    query = query.order_by(InvestigationCase.created_at.desc(), InvestigationCase.id.desc())
+
     # Count total matching
     count_query = select(func.count()).select_from(query.subquery())
     total_count = (await db.execute(count_query)).scalar() or 0
 
     # Paginate
-    query = query.offset((page - 1) * size).limit(size)
-    result = await db.execute(query)
+    paginated_query = query.offset((page - 1) * size).limit(size)
+    result = await db.execute(paginated_query)
     cases = result.scalars().all()
 
     items = [CaseResponse.model_validate(c) for c in cases]
@@ -104,6 +150,35 @@ async def list_pending_cases(
         size=size,
         items=items
     )
+
+
+@router.get(
+    "/{case_id}",
+    response_model=CaseResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {"description": "Case details found"},
+        404: {"model": ErrorResponse, "description": "Case not found"},
+    },
+    summary="Get investigation case detail",
+    description="Retrieves single investigation case record by its unique ID."
+)
+async def get_case_detail(
+    case_id: UUID,
+    db: AsyncSession = Depends(get_db)
+) -> CaseResponse:
+    await _ensure_seed_case(db)
+    stmt = select(InvestigationCase).where(InvestigationCase.id == case_id)
+    result = await db.execute(stmt)
+    case = result.scalar_one_or_none()
+
+    if not case:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Case with ID {case_id} not found"
+        )
+
+    return CaseResponse.model_validate(case)
 
 
 @router.post(
@@ -126,7 +201,10 @@ async def resolve_case(
     result = await db.execute(stmt)
     case = result.scalar_one_or_none()
     if not case:
-        raise HTTPException(status_code=404, detail=f"Case with ID {case_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Case with ID {case_id} not found"
+        )
 
     new_status = (
         CaseStatusEnum.RESOLVED_APPROVED.value
@@ -140,4 +218,5 @@ async def resolve_case(
 
     await db.flush()
     return CaseResponse.model_validate(case)
+
 
