@@ -21,6 +21,12 @@ class CaseResolveRequest(BaseModel):
     resolution_notes: str = Field(..., min_length=5, max_length=1000, description="Audit explanation for resolution decision")
 
 
+class CaseUpdate(BaseModel):
+    priority: Optional[CasePriorityEnum] = Field(default=None, description="Update case priority")
+    assigned_analyst_id: Optional[UUID] = Field(default=None, description="Assign analyst UUID")
+
+
+
 class CaseResponse(CaseBase):
     id: UUID = Field(..., description="Unique case ID")
     status: CaseStatusEnum = Field(default=CaseStatusEnum.PENDING, description="Current investigation status")

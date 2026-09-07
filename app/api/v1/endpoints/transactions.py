@@ -286,3 +286,42 @@ async def get_transaction_detail(
     return _map_transaction_response(transaction)
 
 
+@router.delete(
+    "/{transaction_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        204: {"description": "Transaction deleted successfully"},
+        409: {"model": ErrorResponse, "description": "Conflict: Active investigation case prevents deletion"},
+        404: {"model": ErrorResponse, "description": "Transaction not found"},
+    },
+    summary="Delete or archive transaction",
+    description="Deletes transaction while enforcing database integrity constraints (blocks deletion if linked to an investigation case)."
+)
+async def delete_transaction(
+    transaction_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    stmt = select(Transaction).where(Transaction.id == transaction_id)
+    result = await db.execute(stmt)
+    transaction = result.scalar_one_or_none()
+    if not transaction:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Transaction with ID {transaction_id} not found"
+        )
+
+    # Check database integrity constraint: check linked investigation cases
+    case_stmt = select(InvestigationCase).where(InvestigationCase.transaction_id == transaction_id)
+    linked_case = (await db.execute(case_stmt)).scalar_one_or_none()
+    if linked_case:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete transaction with an associated investigation case. Preserving database integrity constraints."
+        )
+
+    await db.delete(transaction)
+    await db.flush()
+    return None
+
+
+

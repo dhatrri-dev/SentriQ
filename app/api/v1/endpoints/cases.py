@@ -9,7 +9,80 @@ from app.core.database import get_db
 from app.models.case import InvestigationCase
 from app.models.user import User
 from app.models.transaction import Transaction
-from app.schemas.case import CaseResolveRequest, CaseResponse
+from app.schemas.case import CaseResolveRequest, CaseResponse, CaseUpdate
+
+
+@router.patch(
+    "/{case_id}",
+    response_model=CaseResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {"description": "Case updated successfully"},
+        404: {"model": ErrorResponse, "description": "Case not found"},
+    },
+    summary="Partially update investigation case",
+    description="Updates case priority or assigns an analyst."
+)
+async def update_case(
+    case_id: UUID,
+    payload: CaseUpdate,
+    db: AsyncSession = Depends(get_db)
+) -> CaseResponse:
+    await _ensure_seed_case(db)
+    stmt = select(InvestigationCase).where(InvestigationCase.id == case_id)
+    result = await db.execute(stmt)
+    case = result.scalar_one_or_none()
+    if not case:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Case with ID {case_id} not found"
+        )
+
+    update_data = payload.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        if field == "priority" and hasattr(value, "value"):
+            value = value.value
+        setattr(case, field, value)
+
+    await db.flush()
+    return CaseResponse.model_validate(case)
+
+
+@router.delete(
+    "/{case_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        204: {"description": "Pending case deleted / canceled successfully"},
+        400: {"model": ErrorResponse, "description": "Cannot delete resolved cases"},
+        404: {"model": ErrorResponse, "description": "Case not found"},
+    },
+    summary="Delete or dismiss investigation case",
+    description="Dismisses pending cases. Resolved cases cannot be deleted to preserve audit compliance."
+)
+async def delete_case(
+    case_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    await _ensure_seed_case(db)
+    stmt = select(InvestigationCase).where(InvestigationCase.id == case_id)
+    result = await db.execute(stmt)
+    case = result.scalar_one_or_none()
+    if not case:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Case with ID {case_id} not found"
+        )
+
+    if case.status in (CaseStatusEnum.RESOLVED_APPROVED.value, CaseStatusEnum.RESOLVED_BLOCKED.value):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete resolved investigation cases to preserve audit compliance and data integrity."
+        )
+
+    await db.delete(case)
+    await db.flush()
+    return None
+
 from app.schemas.common import CasePriorityEnum, CaseStatusEnum, ErrorResponse, PaginatedResponse, ResolutionActionEnum
 
 router = APIRouter(prefix="/cases", tags=["Investigation Cases"])
