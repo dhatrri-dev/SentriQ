@@ -171,3 +171,39 @@ async def update_rule(
     await db.flush()
     return RuleResponse.model_validate(rule)
 
+
+@router.delete(
+    "/{rule_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        204: {"description": "Rule deleted or deactivated successfully"},
+        404: {"model": ErrorResponse, "description": "Rule not found"},
+    },
+    summary="Delete or deactivate a risk rule",
+    description="Deactivates or permanently removes a risk rule while ensuring evaluation audit safety."
+)
+async def delete_rule(
+    rule_id: UUID,
+    soft: bool = Query(default=True, description="Soft delete (deactivate) or hard delete rule"),
+    db: AsyncSession = Depends(get_db)
+):
+    await _ensure_seed_rules(db)
+    stmt = select(RiskRule).where(RiskRule.id == rule_id)
+    result = await db.execute(stmt)
+    rule = result.scalar_one_or_none()
+    if not rule:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Rule with ID {rule_id} not found"
+        )
+
+    if soft:
+        rule.is_active = False
+        rule.updated_at = datetime.now(timezone.utc)
+    else:
+        await db.delete(rule)
+
+    await db.flush()
+    return None
+
+
