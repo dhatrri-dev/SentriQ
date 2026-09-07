@@ -1,13 +1,13 @@
 from datetime import datetime, timezone
 from typing import List
 from uuid import UUID, uuid4
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models.blocklist import BlocklistEntity
-from app.schemas.blocklist import BlocklistCreate, BlocklistResponse
+from app.schemas.blocklist import BlocklistCreate, BlocklistResponse, BlocklistUpdate
 from app.schemas.common import EntityTypeEnum, ErrorResponse
 
 router = APIRouter(prefix="/blocklist", tags=["Blocklist Management"])
@@ -78,7 +78,6 @@ async def get_blocklist_detail(
     return BlocklistResponse.model_validate(entry)
 
 
-
 @router.post(
     "",
     response_model=BlocklistResponse,
@@ -103,26 +102,70 @@ async def add_to_blocklist(
     return BlocklistResponse.model_validate(entry)
 
 
+@router.patch(
+    "/{entry_id}",
+    response_model=BlocklistResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {"description": "Blocklist entry updated successfully"},
+        404: {"model": ErrorResponse, "description": "Entry not found"},
+    },
+    summary="Partially update blocklist entry",
+    description="Updates reason, expiration timestamp, or active status for a blocklist entry."
+)
+async def update_blocklist_entry(
+    entry_id: UUID,
+    payload: BlocklistUpdate,
+    db: AsyncSession = Depends(get_db)
+) -> BlocklistResponse:
+    await _ensure_seed_blocklist(db)
+    stmt = select(BlocklistEntity).where(BlocklistEntity.id == entry_id)
+    result = await db.execute(stmt)
+    entry = result.scalar_one_or_none()
+    if not entry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Blocklist entry with ID {entry_id} not found"
+        )
+
+    update_data = payload.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(entry, field, value)
+
+    await db.flush()
+    return BlocklistResponse.model_validate(entry)
+
+
 @router.delete(
     "/{entry_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     responses={
-        204: {"description": "Entity removed from blocklist"},
+        204: {"description": "Entity removed or deactivated from blocklist"},
         404: {"model": ErrorResponse, "description": "Entry not found"},
     },
     summary="Remove entity from blocklist"
 )
 async def remove_from_blocklist(
     entry_id: UUID,
+    hard: bool = Query(default=False, description="Perform physical deletion if true; soft deactivation if false"),
     db: AsyncSession = Depends(get_db)
 ):
+    await _ensure_seed_blocklist(db)
     stmt = select(BlocklistEntity).where(BlocklistEntity.id == entry_id)
     result = await db.execute(stmt)
     entry = result.scalar_one_or_none()
     if not entry:
-        raise HTTPException(status_code=404, detail=f"Blocklist entry {entry_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Blocklist entry with ID {entry_id} not found"
+        )
 
-    entry.is_active = False
+    if hard:
+        await db.delete(entry)
+    else:
+        entry.is_active = False
+
     await db.flush()
     return None
+
 

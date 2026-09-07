@@ -16,6 +16,12 @@ class BlocklistCreate(BlocklistBase):
     pass
 
 
+class BlocklistUpdate(BaseModel):
+    reason: Optional[str] = Field(default=None, min_length=3, max_length=255, description="Updated reason for blocklisting")
+    expires_at: Optional[datetime] = Field(default=None, description="Updated expiration timestamp")
+    is_active: Optional[bool] = Field(default=None, description="Set entry active status")
+
+
 class BlocklistResponse(BlocklistBase):
     id: UUID = Field(..., description="Unique blocklist entry ID")
     is_active: bool = Field(default=True, description="Whether the blocklist entry is currently enforced")
@@ -24,3 +30,4 @@ class BlocklistResponse(BlocklistBase):
     model_config = {
         "from_attributes": True
     }
+
