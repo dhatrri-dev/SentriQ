@@ -94,7 +94,7 @@ async def test_create_transaction_evaluate_validation_errors(async_client: Async
 
 
 @pytest.mark.asyncio
-async def test_create_rule_persists_to_db(async_client: AsyncClient, db_session: AsyncSession):
+async def test_create_rule_persists_to_db(auth_client: AsyncClient, db_session: AsyncSession):
     rule_code = f"TEST_RULE_{uuid4().hex[:6].upper()}"
     payload = {
         "rule_code": rule_code,
@@ -106,7 +106,7 @@ async def test_create_rule_persists_to_db(async_client: AsyncClient, db_session:
         "description": "Rule created during integration testing"
     }
 
-    response = await async_client.post("/api/v1/rules", json=payload)
+    response = await auth_client.post("/api/v1/rules", json=payload)
     assert response.status_code == 201
     created_rule = response.json()
     assert created_rule["rule_code"] == rule_code
@@ -119,7 +119,7 @@ async def test_create_rule_persists_to_db(async_client: AsyncClient, db_session:
 
 
 @pytest.mark.asyncio
-async def test_add_blocklist_persists_to_db(async_client: AsyncClient, db_session: AsyncSession):
+async def test_add_blocklist_persists_to_db(auth_client: AsyncClient, db_session: AsyncSession):
     ip_val = "203.0.113.199"
     payload = {
         "entity_type": "IP",
@@ -127,7 +127,7 @@ async def test_add_blocklist_persists_to_db(async_client: AsyncClient, db_sessio
         "reason": "Known fraud botnet IP range"
     }
 
-    response = await async_client.post("/api/v1/blocklist", json=payload)
+    response = await auth_client.post("/api/v1/blocklist", json=payload)
     assert response.status_code == 201
     entry = response.json()
     assert entry["entity_value"] == ip_val
@@ -140,8 +140,8 @@ async def test_add_blocklist_persists_to_db(async_client: AsyncClient, db_sessio
 
 
 @pytest.mark.asyncio
-async def test_resolve_case_persists_to_db(async_client: AsyncClient, db_session: AsyncSession):
-    # First get pending case
+async def test_resolve_case_persists_to_db(async_client: AsyncClient, auth_client: AsyncClient, db_session: AsyncSession):
+    # First get pending case (public)
     get_res = await async_client.get("/api/v1/cases/pending")
     assert get_res.status_code == 200
     cases = get_res.json()["items"]
@@ -153,7 +153,7 @@ async def test_resolve_case_persists_to_db(async_client: AsyncClient, db_session
         "resolution_notes": "Verified customer identity and transaction source."
     }
 
-    response = await async_client.post(f"/api/v1/cases/{target_case_id}/resolve", json=resolve_payload)
+    response = await auth_client.post(f"/api/v1/cases/{target_case_id}/resolve", json=resolve_payload)
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "RESOLVED_APPROVED"

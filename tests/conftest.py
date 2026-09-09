@@ -1,4 +1,5 @@
 import pytest
+from uuid import uuid4
 from httpx import AsyncClient, ASGITransport
 from app.main import app as fastapi_app
 from app.core.database import get_db, engine, Base
@@ -36,3 +37,20 @@ async def async_client():
         yield client
 
 
+@pytest.fixture
+async def auth_token(async_client: AsyncClient) -> str:
+    """Registers a fresh test user and returns its JWT bearer token."""
+    email = f"testuser_{uuid4().hex[:8]}@sentriq.io"
+    res = await async_client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "testpass123", "role": "ANALYST"}
+    )
+    assert res.status_code == 201, f"Auth setup failed: {res.text}"
+    return res.json()["access_token"]
+
+
+@pytest.fixture
+async def auth_client(async_client: AsyncClient, auth_token: str) -> AsyncClient:
+    """Returns an AsyncClient pre-configured with a valid Bearer auth header."""
+    async_client.headers.update({"Authorization": f"Bearer {auth_token}"})
+    return async_client

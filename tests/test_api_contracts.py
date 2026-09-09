@@ -74,15 +74,15 @@ async def test_evaluate_transaction_validation_error(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_rules_endpoints_contract(async_client: AsyncClient):
-    # Test GET /rules
+async def test_rules_endpoints_contract(async_client: AsyncClient, auth_client: AsyncClient):
+    # Test GET /rules (public)
     get_res = await async_client.get("/api/v1/rules")
     assert get_res.status_code == 200
     rules = get_res.json()
     assert isinstance(rules, list)
     assert len(rules) >= 3
 
-    # Test POST /rules with valid payload
+    # Test POST /rules with valid payload (requires auth)
     new_rule = {
         "rule_code": "CUSTOM_RISK_RULE",
         "name": "Custom Test Rule",
@@ -92,28 +92,28 @@ async def test_rules_endpoints_contract(async_client: AsyncClient):
         "is_active": True,
         "description": "Test custom rule description"
     }
-    post_res = await async_client.post("/api/v1/rules", json=new_rule)
+    post_res = await auth_client.post("/api/v1/rules", json=new_rule)
     assert post_res.status_code == 201
     created = post_res.json()
     assert created["rule_code"] == "CUSTOM_RISK_RULE"
 
 
 @pytest.mark.asyncio
-async def test_cases_endpoints_contract(async_client: AsyncClient):
-    # Test GET /cases/pending
+async def test_cases_endpoints_contract(async_client: AsyncClient, auth_client: AsyncClient):
+    # Test GET /cases/pending (public)
     get_res = await async_client.get("/api/v1/cases/pending")
     assert get_res.status_code == 200
     data = get_res.json()
     assert "items" in data
     assert "total" in data
 
-    # Test POST /cases/{id}/resolve (Non-existent case)
+    # Test POST /cases/{id}/resolve (Non-existent case, requires auth)
     fake_case_id = str(uuid4())
     resolve_payload = {
         "action": "APPROVE",
         "resolution_notes": "Legitimate transaction confirmed via phone call."
     }
-    res = await async_client.post(f"/api/v1/cases/{fake_case_id}/resolve", json=resolve_payload)
+    res = await auth_client.post(f"/api/v1/cases/{fake_case_id}/resolve", json=resolve_payload)
     assert res.status_code == 404
 
 
