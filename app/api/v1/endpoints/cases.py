@@ -6,10 +6,15 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.dependencies import get_current_user
 from app.models.case import InvestigationCase
 from app.models.user import User
 from app.models.transaction import Transaction
 from app.schemas.case import CaseResolveRequest, CaseResponse, CaseUpdate
+from app.schemas.common import CasePriorityEnum, CaseStatusEnum, ErrorResponse, PaginatedResponse, ResolutionActionEnum
+
+
+router = APIRouter(prefix="/cases", tags=["Investigation Cases"])
 
 
 @router.patch(
@@ -26,7 +31,8 @@ from app.schemas.case import CaseResolveRequest, CaseResponse, CaseUpdate
 async def update_case(
     case_id: UUID,
     payload: CaseUpdate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ) -> CaseResponse:
     await _ensure_seed_case(db)
     stmt = select(InvestigationCase).where(InvestigationCase.id == case_id)
@@ -61,7 +67,8 @@ async def update_case(
 )
 async def delete_case(
     case_id: UUID,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     await _ensure_seed_case(db)
     stmt = select(InvestigationCase).where(InvestigationCase.id == case_id)
@@ -83,9 +90,6 @@ async def delete_case(
     await db.flush()
     return None
 
-from app.schemas.common import CasePriorityEnum, CaseStatusEnum, ErrorResponse, PaginatedResponse, ResolutionActionEnum
-
-router = APIRouter(prefix="/cases", tags=["Investigation Cases"])
 
 DEFAULT_SEED_CASE = {
     "id": UUID("c1111111-1111-1111-1111-111111111111"),
@@ -268,7 +272,8 @@ async def get_case_detail(
 async def resolve_case(
     case_id: UUID,
     payload: CaseResolveRequest,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ) -> CaseResponse:
     stmt = select(InvestigationCase).where(InvestigationCase.id == case_id)
     result = await db.execute(stmt)

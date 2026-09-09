@@ -1,13 +1,16 @@
 from datetime import datetime, timezone
 from typing import List
 from uuid import UUID, uuid4
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.dependencies import get_current_user
 from app.models.rule import RiskRule
+from app.models.user import User
 from app.schemas.rule import RuleCreate, RuleResponse, RuleUpdate
+
 from app.schemas.common import ErrorResponse, RuleTypeEnum
 
 router = APIRouter(prefix="/rules", tags=["Risk Rules"])
@@ -114,7 +117,8 @@ async def get_rule_detail(
 )
 async def create_rule(
     payload: RuleCreate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ) -> RuleResponse:
     # Check if rule code already exists
     stmt = select(RiskRule).where(RiskRule.rule_code == payload.rule_code)
@@ -146,6 +150,7 @@ async def create_rule(
     status_code=status.HTTP_200_OK,
     responses={
         200: {"description": "Rule updated successfully"},
+        401: {"model": ErrorResponse, "description": "Not authenticated"},
         404: {"model": ErrorResponse, "description": "Rule not found"},
     },
     summary="Update risk rule parameters"
@@ -153,7 +158,8 @@ async def create_rule(
 async def update_rule(
     rule_id: UUID,
     payload: RuleUpdate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ) -> RuleResponse:
     stmt = select(RiskRule).where(RiskRule.id == rule_id)
     result = await db.execute(stmt)
@@ -177,6 +183,7 @@ async def update_rule(
     status_code=status.HTTP_204_NO_CONTENT,
     responses={
         204: {"description": "Rule deleted or deactivated successfully"},
+        401: {"model": ErrorResponse, "description": "Not authenticated"},
         404: {"model": ErrorResponse, "description": "Rule not found"},
     },
     summary="Delete or deactivate a risk rule",
@@ -185,7 +192,8 @@ async def update_rule(
 async def delete_rule(
     rule_id: UUID,
     soft: bool = Query(default=True, description="Soft delete (deactivate) or hard delete rule"),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     await _ensure_seed_rules(db)
     stmt = select(RiskRule).where(RiskRule.id == rule_id)

@@ -6,9 +6,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.dependencies import get_current_user
 from app.models.blocklist import BlocklistEntity
+from app.models.user import User
 from app.schemas.blocklist import BlocklistCreate, BlocklistResponse, BlocklistUpdate
 from app.schemas.common import EntityTypeEnum, ErrorResponse
+
 
 router = APIRouter(prefix="/blocklist", tags=["Blocklist Management"])
 
@@ -86,7 +89,8 @@ async def get_blocklist_detail(
 )
 async def add_to_blocklist(
     payload: BlocklistCreate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ) -> BlocklistResponse:
     entity_type_str = payload.entity_type.value if hasattr(payload.entity_type, "value") else str(payload.entity_type)
     entry = BlocklistEntity(
@@ -116,7 +120,8 @@ async def add_to_blocklist(
 async def update_blocklist_entry(
     entry_id: UUID,
     payload: BlocklistUpdate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ) -> BlocklistResponse:
     await _ensure_seed_blocklist(db)
     stmt = select(BlocklistEntity).where(BlocklistEntity.id == entry_id)
@@ -148,7 +153,8 @@ async def update_blocklist_entry(
 async def remove_from_blocklist(
     entry_id: UUID,
     hard: bool = Query(default=False, description="Perform physical deletion if true; soft deactivation if false"),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     await _ensure_seed_blocklist(db)
     stmt = select(BlocklistEntity).where(BlocklistEntity.id == entry_id)
