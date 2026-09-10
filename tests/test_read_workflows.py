@@ -18,9 +18,9 @@ from tests.db_fixtures import setup_test_database, db_session  # noqa: F401
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_list_transactions_paginated(async_client: AsyncClient):
+async def test_list_transactions_paginated(auth_client: AsyncClient):
     """GET /transactions returns paginated structure with correct fields."""
-    response = await async_client.get("/api/v1/transactions?page=1&size=5")
+    response = await auth_client.get("/api/v1/transactions?page=1&size=5")
     assert response.status_code == 200
     data = response.json()
     assert "total" in data
@@ -33,7 +33,7 @@ async def test_list_transactions_paginated(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_list_transactions_stable_ordering(async_client: AsyncClient):
+async def test_list_transactions_stable_ordering(auth_client: AsyncClient):
     """Transactions list returns newest-first ordering."""
     # Create two transactions with different amounts to differentiate
     user_id = str(uuid4())
@@ -49,10 +49,10 @@ async def test_list_transactions_stable_ordering(async_client: AsyncClient):
             "timestamp": "2026-09-05T08:00:00Z"
         }
 
-    await async_client.post("/api/v1/transactions/evaluate", json=_payload(100.00))
-    await async_client.post("/api/v1/transactions/evaluate", json=_payload(200.00))
+    await auth_client.post("/api/v1/transactions/evaluate", json=_payload(100.00))
+    await auth_client.post("/api/v1/transactions/evaluate", json=_payload(200.00))
 
-    response = await async_client.get("/api/v1/transactions?page=1&size=50")
+    response = await auth_client.get("/api/v1/transactions?page=1&size=50")
     assert response.status_code == 200
     items = response.json()["items"]
     # The list must have at least 2 items and be ordered newest → oldest
@@ -60,7 +60,7 @@ async def test_list_transactions_stable_ordering(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_get_transaction_detail_scoped(async_client: AsyncClient):
+async def test_get_transaction_detail_scoped(auth_client: AsyncClient):
     """GET /transactions/{id} returns the exact transaction record."""
     payload = {
         "user_id": str(uuid4()),
@@ -71,11 +71,11 @@ async def test_get_transaction_detail_scoped(async_client: AsyncClient):
         "location": {"latitude": 51.50, "longitude": -0.12, "country": "GB", "city": "London"},
         "timestamp": "2026-09-05T08:10:00Z"
     }
-    create_res = await async_client.post("/api/v1/transactions/evaluate", json=payload)
+    create_res = await auth_client.post("/api/v1/transactions/evaluate", json=payload)
     assert create_res.status_code == 200
     tx_id = create_res.json()["transaction_id"]
 
-    detail_res = await async_client.get(f"/api/v1/transactions/{tx_id}")
+    detail_res = await auth_client.get(f"/api/v1/transactions/{tx_id}")
     assert detail_res.status_code == 200
     data = detail_res.json()
     assert data["id"] == tx_id
@@ -84,10 +84,10 @@ async def test_get_transaction_detail_scoped(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_get_transaction_detail_404(async_client: AsyncClient):
+async def test_get_transaction_detail_404(auth_client: AsyncClient):
     """GET /transactions/{id} with unknown ID returns 404."""
     fake_id = str(uuid4())
-    response = await async_client.get(f"/api/v1/transactions/{fake_id}")
+    response = await auth_client.get(f"/api/v1/transactions/{fake_id}")
     assert response.status_code == 404
     data = response.json()
     assert "detail" in data
@@ -186,9 +186,9 @@ async def test_get_blocklist_detail_404(async_client: AsyncClient):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_list_cases_paginated_structure(async_client: AsyncClient):
+async def test_list_cases_paginated_structure(auth_client: AsyncClient):
     """GET /cases returns paginated structure with total/page/size/items fields."""
-    response = await async_client.get("/api/v1/cases?page=1&size=10")
+    response = await auth_client.get("/api/v1/cases?page=1&size=10")
     assert response.status_code == 200
     data = response.json()
     assert "total" in data
@@ -200,16 +200,16 @@ async def test_list_cases_paginated_structure(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_get_case_detail_scoped(async_client: AsyncClient):
+async def test_get_case_detail_scoped(auth_client: AsyncClient):
     """GET /cases/{case_id} returns the exact investigation case."""
     # Seed case from /pending
-    list_res = await async_client.get("/api/v1/cases/pending")
+    list_res = await auth_client.get("/api/v1/cases/pending")
     assert list_res.status_code == 200
     cases = list_res.json()["items"]
     assert len(cases) > 0
     case_id = cases[0]["id"]
 
-    detail_res = await async_client.get(f"/api/v1/cases/{case_id}")
+    detail_res = await auth_client.get(f"/api/v1/cases/{case_id}")
     assert detail_res.status_code == 200
     data = detail_res.json()
     assert data["id"] == case_id
@@ -219,10 +219,10 @@ async def test_get_case_detail_scoped(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_get_case_detail_404(async_client: AsyncClient):
+async def test_get_case_detail_404(auth_client: AsyncClient):
     """GET /cases/{case_id} with unknown ID returns 404."""
     fake_id = str(uuid4())
-    response = await async_client.get(f"/api/v1/cases/{fake_id}")
+    response = await auth_client.get(f"/api/v1/cases/{fake_id}")
     assert response.status_code == 404
     data = response.json()
     assert "detail" in data

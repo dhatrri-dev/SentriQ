@@ -167,7 +167,7 @@ async def test_delete_resolved_case_integrity_constraint(async_client: AsyncClie
 
 
 @pytest.mark.asyncio
-async def test_delete_transaction_linked_case_conflict(async_client: AsyncClient):
+async def test_delete_transaction_linked_case_conflict(auth_client: AsyncClient):
     """DELETE /transactions/{id} linked to an investigation case returns 409 Conflict."""
     payload = {
         "user_id": str(uuid4()),
@@ -178,19 +178,19 @@ async def test_delete_transaction_linked_case_conflict(async_client: AsyncClient
         "location": {"latitude": 40.71, "longitude": -74.00, "country": "US"},
         "timestamp": "2026-09-07T12:00:00Z"
     }
-    eval_res = await async_client.post("/api/v1/transactions/evaluate", json=payload)
+    eval_res = await auth_client.post("/api/v1/transactions/evaluate", json=payload)
     assert eval_res.status_code == 200
     tx_id = eval_res.json()["transaction_id"]
     assert eval_res.json()["case_id"] is not None
 
     # Attempt to delete transaction with linked investigation case
-    del_res = await async_client.delete(f"/api/v1/transactions/{tx_id}")
+    del_res = await auth_client.delete(f"/api/v1/transactions/{tx_id}")
     assert del_res.status_code == 409
     assert "investigation case" in del_res.json()["detail"].lower()
 
 
 @pytest.mark.asyncio
-async def test_delete_standalone_transaction_success(async_client: AsyncClient):
+async def test_delete_standalone_transaction_success(auth_client: AsyncClient):
     """DELETE /transactions/{id} deletes clean standalone transaction without linked cases."""
     payload = {
         "user_id": str(uuid4()),
@@ -201,15 +201,15 @@ async def test_delete_standalone_transaction_success(async_client: AsyncClient):
         "location": {"latitude": 40.71, "longitude": -74.00, "country": "US"},
         "timestamp": "2026-09-07T12:05:00Z"
     }
-    eval_res = await async_client.post("/api/v1/transactions/evaluate", json=payload)
+    eval_res = await auth_client.post("/api/v1/transactions/evaluate", json=payload)
     assert eval_res.status_code == 200
     tx_id = eval_res.json()["transaction_id"]
     assert eval_res.json()["case_id"] is None
 
     # Deleting standalone transaction returns 204
-    del_res = await async_client.delete(f"/api/v1/transactions/{tx_id}")
+    del_res = await auth_client.delete(f"/api/v1/transactions/{tx_id}")
     assert del_res.status_code == 204
 
     # Subsequent GET returns 404
-    get_res = await async_client.get(f"/api/v1/transactions/{tx_id}")
+    get_res = await auth_client.get(f"/api/v1/transactions/{tx_id}")
     assert get_res.status_code == 404
