@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, require_roles, verify_resource_ownership
 from app.models.case import InvestigationCase
 from app.models.user import User
 from app.models.transaction import Transaction
@@ -32,7 +32,7 @@ async def update_case(
     case_id: UUID,
     payload: CaseUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_roles("ADMIN", "ANALYST"))
 ) -> CaseResponse:
     await _ensure_seed_case(db)
     stmt = select(InvestigationCase).where(InvestigationCase.id == case_id)
@@ -79,6 +79,8 @@ async def delete_case(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Case with ID {case_id} not found"
         )
+
+    verify_resource_ownership(case.user_id, current_user)
 
     if case.status in (CaseStatusEnum.RESOLVED_APPROVED.value, CaseStatusEnum.RESOLVED_BLOCKED.value):
         raise HTTPException(
@@ -158,11 +160,16 @@ async def list_cases(
     size: int = Query(default=20, ge=1, le=100, description="Page size limit"),
     status_filter: Optional[CaseStatusEnum] = Query(default=None, alias="status", description="Filter by status"),
     priority_filter: Optional[CasePriorityEnum] = Query(default=None, alias="priority", description="Filter by priority"),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ) -> PaginatedResponse[CaseResponse]:
     await _ensure_seed_case(db)
 
     query = select(InvestigationCase)
+    user_role = (current_user.role or "").upper()
+    if user_role == "CLIENT":
+        query = query.where(InvestigationCase.user_id == current_user.id)
+
     if status_filter:
         query = query.where(InvestigationCase.status == status_filter.value)
     if priority_filter:
@@ -200,7 +207,8 @@ async def list_pending_cases(
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
     priority: Optional[CasePriorityEnum] = Query(default=None),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles("ADMIN", "ANALYST"))
 ) -> PaginatedResponse[CaseResponse]:
     await _ensure_seed_case(db)
     
@@ -242,7 +250,8 @@ async def list_pending_cases(
 )
 async def get_case_detail(
     case_id: UUID,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ) -> CaseResponse:
     await _ensure_seed_case(db)
     stmt = select(InvestigationCase).where(InvestigationCase.id == case_id)
@@ -254,6 +263,8 @@ async def get_case_detail(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Case with ID {case_id} not found"
         )
+
+    verify_resource_ownership(case.user_id, current_user)
 
     return CaseResponse.model_validate(case)
 
@@ -273,7 +284,7 @@ async def resolve_case(
     case_id: UUID,
     payload: CaseResolveRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_roles("ADMIN", "ANALYST"))
 ) -> CaseResponse:
     stmt = select(InvestigationCase).where(InvestigationCase.id == case_id)
     result = await db.execute(stmt)
@@ -291,7 +302,7 @@ async def resolve_case(
     )
     case.status = new_status
     case.resolution_notes = payload.resolution_notes
-    case.assigned_analyst_id = uuid4()
+    case.assigned_analyst_id = current_user.id
     case.resolved_at = datetime.now(timezone.utc)
 
     await db.flush()
