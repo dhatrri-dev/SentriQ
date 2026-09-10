@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, require_roles
 from app.models.rule import RiskRule
 from app.models.user import User
 from app.schemas.rule import RuleCreate, RuleResponse, RuleUpdate
@@ -118,7 +118,7 @@ async def get_rule_detail(
 async def create_rule(
     payload: RuleCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_roles("ADMIN", "ANALYST"))
 ) -> RuleResponse:
     # Check if rule code already exists
     stmt = select(RiskRule).where(RiskRule.rule_code == payload.rule_code)
@@ -159,7 +159,7 @@ async def update_rule(
     rule_id: UUID,
     payload: RuleUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_roles("ADMIN", "ANALYST"))
 ) -> RuleResponse:
     stmt = select(RiskRule).where(RiskRule.id == rule_id)
     result = await db.execute(stmt)
@@ -193,7 +193,7 @@ async def delete_rule(
     rule_id: UUID,
     soft: bool = Query(default=True, description="Soft delete (deactivate) or hard delete rule"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_roles("ADMIN", "ANALYST"))
 ):
     await _ensure_seed_rules(db)
     stmt = select(RiskRule).where(RiskRule.id == rule_id)

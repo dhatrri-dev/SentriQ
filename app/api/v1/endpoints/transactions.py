@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.dependencies import get_current_user, get_current_user_optional, verify_resource_ownership
 from app.models.user import User
 from app.models.transaction import Transaction
 from app.models.evaluation import EvaluationLog, EvaluationLogItem
@@ -36,9 +37,18 @@ router = APIRouter(prefix="/transactions", tags=["Transactions & Evaluation"])
 )
 async def evaluate_transaction(
     payload: TransactionEvaluationRequest,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional)
 ) -> TransactionEvaluationResponse:
     start_time = time.perf_counter()
+
+    # Enforce ownership if client user is authenticated
+    if current_user and (current_user.role or "").upper() == "CLIENT":
+        if str(payload.user_id) != str(current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: Cannot evaluate transactions for another user account."
+            )
 
     # 1. Ensure User exists or auto-create test user
     user_stmt = select(User).where(User.id == payload.user_id)
@@ -226,14 +236,25 @@ async def list_transactions(
     size: int = Query(default=20, ge=1, le=100, description="Page size limit"),
     user_id: Optional[UUID] = Query(default=None, description="Filter by User ID"),
     status_filter: Optional[str] = Query(default=None, alias="status", description="Filter by status (ALLOW, FLAGGED, BLOCK)"),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ) -> PaginatedResponse[TransactionResponse]:
     from sqlalchemy import func
     from app.schemas.common import PaginatedResponse
 
     query = select(Transaction)
-    if user_id:
-        query = query.where(Transaction.user_id == user_id)
+    user_role = (current_user.role or "").upper()
+    if user_role == "CLIENT":
+        if user_id and str(user_id) != str(current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You cannot view another user's transactions."
+            )
+        query = query.where(Transaction.user_id == current_user.id)
+    else:
+        if user_id:
+            query = query.where(Transaction.user_id == user_id)
+
     if status_filter:
         query = query.where(Transaction.status == status_filter.upper())
 
@@ -271,7 +292,8 @@ async def list_transactions(
 )
 async def get_transaction_detail(
     transaction_id: UUID,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ) -> TransactionResponse:
     stmt = select(Transaction).where(Transaction.id == transaction_id)
     result = await db.execute(stmt)
@@ -282,6 +304,8 @@ async def get_transaction_detail(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Transaction with ID {transaction_id} not found"
         )
+
+    verify_resource_ownership(transaction.user_id, current_user)
 
     return _map_transaction_response(transaction)
 
@@ -299,7 +323,8 @@ async def get_transaction_detail(
 )
 async def delete_transaction(
     transaction_id: UUID,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     stmt = select(Transaction).where(Transaction.id == transaction_id)
     result = await db.execute(stmt)
@@ -309,6 +334,8 @@ async def delete_transaction(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Transaction with ID {transaction_id} not found"
         )
+
+    verify_resource_ownership(transaction.user_id, current_user)
 
     # Check database integrity constraint: check linked investigation cases
     case_stmt = select(InvestigationCase).where(InvestigationCase.transaction_id == transaction_id)
