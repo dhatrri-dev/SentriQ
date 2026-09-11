@@ -148,6 +148,8 @@ async def _ensure_seed_case(db: AsyncSession):
         await db.flush()
 
 
+from sqlalchemy import or_, String
+
 @router.get(
     "",
     response_model=PaginatedResponse[CaseResponse],
@@ -160,6 +162,9 @@ async def list_cases(
     size: int = Query(default=20, ge=1, le=100, description="Page size limit"),
     status_filter: Optional[CaseStatusEnum] = Query(default=None, alias="status", description="Filter by status"),
     priority_filter: Optional[CasePriorityEnum] = Query(default=None, alias="priority", description="Filter by priority"),
+    search: Optional[str] = Query(default=None, description="Search in resolution notes"),
+    start_date: Optional[datetime] = Query(default=None, description="Filter by creation date (start)"),
+    end_date: Optional[datetime] = Query(default=None, description="Filter by creation date (end)"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ) -> PaginatedResponse[CaseResponse]:
@@ -174,6 +179,15 @@ async def list_cases(
         query = query.where(InvestigationCase.status == status_filter.value)
     if priority_filter:
         query = query.where(InvestigationCase.priority == priority_filter.value)
+        
+    if search:
+        search_pattern = f"%{search}%"
+        query = query.where(InvestigationCase.resolution_notes.ilike(search_pattern))
+        
+    if start_date:
+        query = query.where(InvestigationCase.created_at >= start_date)
+    if end_date:
+        query = query.where(InvestigationCase.created_at <= end_date)
 
     # Stable ordering: newest created_at first, tie breaker on unique primary key id
     query = query.order_by(InvestigationCase.created_at.desc(), InvestigationCase.id.desc())

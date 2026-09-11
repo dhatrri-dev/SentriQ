@@ -37,17 +37,42 @@ async def _ensure_seed_blocklist(db: AsyncSession):
         await db.flush()
 
 
+from sqlalchemy import or_, String
+
 @router.get(
     "",
     response_model=List[BlocklistResponse],
     status_code=status.HTTP_200_OK,
     summary="List blocklist entries",
-    description="Returns all active blocklist entries sorted with stable ordering."
+    description="Returns active blocklist entries, with optional filtering and search."
 )
-async def list_blocklist(db: AsyncSession = Depends(get_db)) -> List[BlocklistResponse]:
+async def list_blocklist(
+    entity_type: str = Query(None, description="Filter by entity type (e.g. EMAIL_DOMAIN, IP_ADDRESS)"),
+    is_active: bool = Query(True, description="Filter by active status"),
+    search: str = Query(None, description="Search in entity value or reason"),
+    db: AsyncSession = Depends(get_db)
+) -> List[BlocklistResponse]:
     await _ensure_seed_blocklist(db)
-    stmt = select(BlocklistEntity).where(BlocklistEntity.is_active == True).order_by(BlocklistEntity.created_at.desc(), BlocklistEntity.id.desc())
-    result = await db.execute(stmt)
+    
+    query = select(BlocklistEntity)
+    
+    if is_active is not None:
+        query = query.where(BlocklistEntity.is_active == is_active)
+        
+    if entity_type:
+        query = query.where(BlocklistEntity.entity_type == entity_type)
+        
+    if search:
+        search_pattern = f"%{search}%"
+        query = query.where(
+            or_(
+                BlocklistEntity.entity_value.ilike(search_pattern),
+                BlocklistEntity.reason.ilike(search_pattern)
+            )
+        )
+        
+    query = query.order_by(BlocklistEntity.created_at.desc(), BlocklistEntity.id.desc())
+    result = await db.execute(query)
     items = result.scalars().all()
     return [BlocklistResponse.model_validate(item) for item in items]
 
