@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import List
 from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -10,7 +10,6 @@ from app.core.dependencies import get_current_user, require_roles
 from app.models.rule import RiskRule
 from app.models.user import User
 from app.schemas.rule import RuleCreate, RuleResponse, RuleUpdate
-
 from app.schemas.common import ErrorResponse, RuleTypeEnum
 
 router = APIRouter(prefix="/rules", tags=["Risk Rules"])
@@ -67,9 +66,33 @@ async def _ensure_seed_rules(db: AsyncSession):
     summary="List all risk rules",
     description="Returns all active and inactive fraud evaluation rules sorted with stable ordering."
 )
-async def list_rules(db: AsyncSession = Depends(get_db)) -> List[RuleResponse]:
+async def list_rules(
+    search: Optional[str] = Query(default=None, description="Search by code, name, or description"),
+    rule_type: Optional[RuleTypeEnum] = Query(default=None, description="Filter by rule category"),
+    is_active: Optional[bool] = Query(default=None, description="Filter by active status"),
+    db: AsyncSession = Depends(get_db)
+) -> List[RuleResponse]:
     await _ensure_seed_rules(db)
-    stmt = select(RiskRule).order_by(RiskRule.created_at.desc(), RiskRule.id.desc())
+    stmt = select(RiskRule)
+
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        stmt = stmt.where(
+            or_(
+                RiskRule.rule_code.ilike(pattern),
+                RiskRule.name.ilike(pattern),
+                RiskRule.description.ilike(pattern)
+            )
+        )
+
+    if rule_type:
+        type_val = rule_type.value if hasattr(rule_type, "value") else str(rule_type)
+        stmt = stmt.where(RiskRule.rule_type == type_val)
+
+    if is_active is not None:
+        stmt = stmt.where(RiskRule.is_active == is_active)
+
+    stmt = stmt.order_by(RiskRule.created_at.desc(), RiskRule.id.desc())
     result = await db.execute(stmt)
     rules = result.scalars().all()
     return [RuleResponse.model_validate(rule) for rule in rules]

@@ -3,7 +3,7 @@ import time
 from typing import Optional
 from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -236,6 +236,15 @@ async def list_transactions(
     size: int = Query(default=20, ge=1, le=100, description="Page size limit"),
     user_id: Optional[UUID] = Query(default=None, description="Filter by User ID"),
     status_filter: Optional[str] = Query(default=None, alias="status", description="Filter by status (ALLOW, FLAGGED, BLOCK)"),
+    search: Optional[str] = Query(default=None, description="Search by IP, card hash, city, country, or device ID"),
+    min_amount: Optional[float] = Query(default=None, ge=0.0, description="Filter by minimum amount"),
+    max_amount: Optional[float] = Query(default=None, ge=0.0, description="Filter by maximum amount"),
+    min_risk_score: Optional[int] = Query(default=None, ge=0, le=100, description="Filter by minimum risk score"),
+    max_risk_score: Optional[int] = Query(default=None, ge=0, le=100, description="Filter by maximum risk score"),
+    country: Optional[str] = Query(default=None, description="Filter by country code"),
+    currency: Optional[str] = Query(default=None, description="Filter by currency code"),
+    start_date: Optional[datetime] = Query(default=None, description="Filter transactions created on or after timestamp"),
+    end_date: Optional[datetime] = Query(default=None, description="Filter transactions created on or before timestamp"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ) -> PaginatedResponse[TransactionResponse]:
@@ -257,6 +266,35 @@ async def list_transactions(
 
     if status_filter:
         query = query.where(Transaction.status == status_filter.upper())
+
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                Transaction.ip_address.ilike(pattern),
+                Transaction.card_hash.ilike(pattern),
+                Transaction.city.ilike(pattern),
+                Transaction.country.ilike(pattern),
+                Transaction.device_id.ilike(pattern)
+            )
+        )
+
+    if min_amount is not None:
+        query = query.where(Transaction.amount >= min_amount)
+    if max_amount is not None:
+        query = query.where(Transaction.amount <= max_amount)
+    if min_risk_score is not None:
+        query = query.where(Transaction.risk_score >= min_risk_score)
+    if max_risk_score is not None:
+        query = query.where(Transaction.risk_score <= max_risk_score)
+    if country:
+        query = query.where(Transaction.country.upper() == country.strip().upper())
+    if currency:
+        query = query.where(Transaction.currency.upper() == currency.strip().upper())
+    if start_date:
+        query = query.where(Transaction.timestamp >= start_date)
+    if end_date:
+        query = query.where(Transaction.timestamp <= end_date)
 
     # Stable ordering: newest timestamp first, tie breaker on unique primary key id
     query = query.order_by(Transaction.timestamp.desc(), Transaction.id.desc())
