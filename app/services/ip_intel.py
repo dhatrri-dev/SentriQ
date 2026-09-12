@@ -27,12 +27,13 @@ class IPIntelligenceService:
         self._client = client
 
     def _get_client(self) -> httpx.AsyncClient:
-        if self._client and not self._client.is_closed:
+        if self._client is not None:
             return self._client
         return httpx.AsyncClient(
             timeout=httpx.Timeout(self.timeout_seconds, connect=1.0),
             headers={"X-API-Key": self.api_key, "User-Agent": f"SentriQ-Engine/{settings.VERSION}"}
         )
+
 
     async def enrich_ip(self, ip_address: str) -> IPEnrichmentResponse:
         """
