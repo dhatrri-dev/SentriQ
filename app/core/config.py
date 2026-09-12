@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
 
+    # External IP Intelligence Service Settings
+    IP_INTEL_SERVICE_URL: str = "https://api.ip-intel.internal"
+    IP_INTEL_TIMEOUT_SECONDS: float = 3.0
+    IP_INTEL_API_KEY: str = "sentriq_dev_key_sec_123"
+
 
     @property
     def ASYNC_DATABASE_URL(self) -> str:
