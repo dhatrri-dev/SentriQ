@@ -52,6 +52,13 @@ app.add_middleware(
 
 
 
+import logging
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+
+logger = logging.getLogger("sentriq.exceptions")
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc: RequestValidationError):
     """Custom exception handler to return structured, user-friendly 422 validation errors."""
@@ -68,13 +75,89 @@ async def validation_exception_handler(request, exc: RequestValidationError):
         detail="One or more request payload fields failed validation.",
         errors=formatted_errors
     )
-    # Include standard FastAPI detail list for backward compatibility
     res_content = error_response.model_dump()
     res_content["detail"] = exc.errors()
+    request_id = getattr(request.state, "request_id", None)
+    headers = {"x-request-id": request_id} if request_id else {}
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content=res_content
+        content=res_content,
+        headers=headers
     )
+
+
+@app.exception_handler(IntegrityError)
+@app.exception_handler(SQLAlchemyError)
+async def database_exception_handler(request, exc: SQLAlchemyError):
+    """Handles database integrity and constraint errors with actionable client feedback."""
+    request_id = getattr(request.state, "request_id", None)
+    logger.error(
+        f"Database transaction error during {request.method} {request.url.path}: {exc}",
+        exc_info=True,
+        extra={"request_id": request_id} if request_id else {}
+    )
+
+    is_integrity = isinstance(exc, IntegrityError)
+    status_code = status.HTTP_409_CONFLICT if is_integrity else status.HTTP_400_BAD_REQUEST
+    error_title = "Database Conflict Error" if is_integrity else "Database Transaction Error"
+    actionable_detail = (
+        "Database constraint violation occurred. Check for duplicate unique keys or invalid foreign references."
+        if is_integrity else "Database transaction could not be processed. Request has been safely rolled back."
+    )
+
+    headers = {"x-request-id": request_id} if request_id else {}
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": error_title,
+            "detail": actionable_detail,
+            "request_id": request_id
+        },
+        headers=headers
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request, exc: StarletteHTTPException):
+    """Standardized handler for HTTP exceptions ensuring request ID propagation."""
+    request_id = getattr(request.state, "request_id", None)
+    headers = {"x-request-id": request_id} if request_id else {}
+    
+    content = {
+        "error": f"HTTP {exc.status_code}",
+        "detail": str(exc.detail),
+    }
+    if request_id:
+        content["request_id"] = request_id
+
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=content,
+        headers=headers
+    )
+
+
+@app.exception_handler(Exception)
+async def generic_uncaught_exception_handler(request, exc: Exception):
+    """Global catch-all exception handler logging unexpected errors and returning safe actionable 500 response."""
+    request_id = getattr(request.state, "request_id", None)
+    logger.error(
+        f"Uncaught internal engine error processing {request.method} {request.url.path}: {exc}",
+        exc_info=True,
+        extra={"request_id": request_id} if request_id else {}
+    )
+
+    headers = {"x-request-id": request_id} if request_id else {}
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "error": "Internal Server Error",
+            "detail": "An unexpected internal server error occurred. Please contact support with the correlation request ID.",
+            "request_id": request_id
+        },
+        headers=headers
+    )
+
 
 
 
