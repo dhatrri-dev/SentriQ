@@ -126,68 +126,75 @@ async def evaluate_transaction(
     else:
         decision = DecisionEnum.ALLOW
 
-    # 3. Save Transaction
-    tx_id = uuid4()
-    transaction = Transaction(
-        id=tx_id,
-        user_id=payload.user_id,
-        card_hash=payload.card_hash,
-        card_bin=payload.card_bin,
-        amount=payload.amount,
-        currency=payload.currency,
-        ip_address=str(payload.ip_address),
-        latitude=payload.location.latitude,
-        longitude=payload.location.longitude,
-        country=payload.location.country,
-        city=payload.location.city,
-        device_id=payload.device_id,
-        status=decision.value,
-        risk_score=risk_score,
-        timestamp=payload.timestamp
-    )
-    db.add(transaction)
+    # 3. Persist evaluation objects atomically inside a savepoint transaction block
+    try:
+        async with db.begin_nested():
+            tx_id = uuid4()
+            transaction = Transaction(
+                id=tx_id,
+                user_id=payload.user_id,
+                card_hash=payload.card_hash,
+                card_bin=payload.card_bin,
+                amount=payload.amount,
+                currency=payload.currency,
+                ip_address=str(payload.ip_address),
+                latitude=payload.location.latitude,
+                longitude=payload.location.longitude,
+                country=payload.location.country,
+                city=payload.location.city,
+                device_id=payload.device_id,
+                status=decision.value,
+                risk_score=risk_score,
+                timestamp=payload.timestamp
+            )
+            db.add(transaction)
 
-    # 4. Save Evaluation Log
-    exec_time_ms = round((time.perf_counter() - start_time) * 1000, 2)
-    eval_log_id = uuid4()
-    eval_log = EvaluationLog(
-        id=eval_log_id,
-        transaction_id=tx_id,
-        final_score=risk_score,
-        decision=decision.value,
-        rules_triggered_count=len(rules_triggered),
-        execution_time_ms=exec_time_ms,
-        evaluated_at=datetime.now(timezone.utc)
-    )
-    db.add(eval_log)
+            # 4. Save Evaluation Log
+            exec_time_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            eval_log_id = uuid4()
+            eval_log = EvaluationLog(
+                id=eval_log_id,
+                transaction_id=tx_id,
+                final_score=risk_score,
+                decision=decision.value,
+                rules_triggered_count=len(rules_triggered),
+                execution_time_ms=exec_time_ms,
+                evaluated_at=datetime.now(timezone.utc)
+            )
+            db.add(eval_log)
 
-    # 5. Save Evaluation Log Items
-    for item in rules_triggered:
-        log_item = EvaluationLogItem(
-            id=uuid4(),
-            evaluation_log_id=eval_log_id,
-            rule_code=item.rule_code,
-            points_assigned=item.points_assigned,
-            reason=item.reason
-        )
-        db.add(log_item)
+            # 5. Save Evaluation Log Items
+            for item in rules_triggered:
+                log_item = EvaluationLogItem(
+                    id=uuid4(),
+                    evaluation_log_id=eval_log_id,
+                    rule_code=item.rule_code,
+                    points_assigned=item.points_assigned,
+                    reason=item.reason
+                )
+                db.add(log_item)
 
-    # 6. Save Investigation Case if flagged or blocked
-    case_id = None
-    if decision in (DecisionEnum.FLAG_FOR_REVIEW, DecisionEnum.BLOCK):
-        case_id = uuid4()
-        priority = CasePriorityEnum.HIGH if decision == DecisionEnum.BLOCK else CasePriorityEnum.MEDIUM
-        case = InvestigationCase(
-            id=case_id,
-            transaction_id=tx_id,
-            user_id=payload.user_id,
-            risk_score=risk_score,
-            status=CaseStatusEnum.PENDING.value,
-            priority=priority.value
-        )
-        db.add(case)
+            # 6. Save Investigation Case if flagged or blocked
+            case_id = None
+            if decision in (DecisionEnum.FLAG_FOR_REVIEW, DecisionEnum.BLOCK):
+                case_id = uuid4()
+                priority = CasePriorityEnum.HIGH if decision == DecisionEnum.BLOCK else CasePriorityEnum.MEDIUM
+                case = InvestigationCase(
+                    id=case_id,
+                    transaction_id=tx_id,
+                    user_id=payload.user_id,
+                    risk_score=risk_score,
+                    status=CaseStatusEnum.PENDING.value,
+                    priority=priority.value
+                )
+                db.add(case)
 
-    await db.flush()
+            await db.flush()
+
+    except Exception as exc:
+        await db.rollback()
+        raise exc
+
 
     return TransactionEvaluationResponse(
         transaction_id=tx_id,
