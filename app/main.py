@@ -14,6 +14,13 @@ from fastapi.responses import JSONResponse
 from app.schemas.common import ErrorDetail, ErrorResponse
 
 
+from app.core.logging import setup_structured_logging
+from app.core.middleware import RequestTracingMiddleware
+
+# Initialize structured JSON logging system
+setup_structured_logging()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Create all database tables on startup using SQLAlchemy metadata."""
@@ -33,7 +40,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Set up CORS middleware
+# Set up tracing and CORS middleware
+app.add_middleware(RequestTracingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -41,6 +49,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 
 @app.exception_handler(RequestValidationError)
