@@ -3,10 +3,18 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.core.database import Base
 import app.models  # noqa: F401 — register all ORM models
 
-# Use a local SQLite test database so tests run 100% offline without network
-TEST_DATABASE_URL = "sqlite+aiosqlite:///./test_sentriq.db"
+from sqlalchemy.pool import StaticPool
 
-test_engine = create_async_engine(TEST_DATABASE_URL, echo=False, future=True)
+# Use an isolated in-memory SQLite database so tests run 100% offline and isolated
+TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+
+test_engine = create_async_engine(
+    TEST_DATABASE_URL,
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+    echo=False,
+    future=True
+)
 TestSessionLocal = async_sessionmaker(
     bind=test_engine,
     class_=AsyncSession,
@@ -25,6 +33,7 @@ async def setup_test_database():
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
     await test_engine.dispose()
+
 
 
 @pytest.fixture
