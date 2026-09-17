@@ -6,10 +6,11 @@ class Settings(BaseSettings):
     PROJECT_DESCRIPTION: str = "Real-Time Transaction Risk & Fraud Rule Engine"
     VERSION: str = "0.1.0"
     API_V1_STR: str = "/api/v1"
-    ENVIRONMENT: str = "development"
-    DEBUG: bool = True
+    ENVIRONMENT: str = "production"
+    DEBUG: bool = False
     HOST: str = "0.0.0.0"
     PORT: int = 8000
+
 
     # Database Configuration (Defaults to local async SQLite, configurable via .env for Supabase PostgreSQL)
     DATABASE_URL: str = "sqlite+aiosqlite:///./sentriq.db"
