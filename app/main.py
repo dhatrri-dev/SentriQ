@@ -30,13 +30,53 @@ async def lifespan(app: FastAPI):
     await engine.dispose()
 
 
+tags_metadata = [
+    {
+        "name": "Authentication",
+        "description": "User registration, JWT authentication token issuance, and profile retrieval.",
+    },
+    {
+        "name": "Transactions",
+        "description": "Real-time payment transaction risk evaluation, scoring, and transaction history.",
+    },
+    {
+        "name": "Cases",
+        "description": "Fraud investigation case review queue, assignment, and manual case resolution.",
+    },
+    {
+        "name": "Rules",
+        "description": "Management of behavioral fraud risk rules (velocity, anomaly, geo-distance, thresholds).",
+    },
+    {
+        "name": "Blocklist",
+        "description": "Suspicious IP addresses, email domains, and BIN blocklist enforcement.",
+    },
+    {
+        "name": "IP Intelligence",
+        "description": "External IP reputation, proxy/VPN detection, and geolocation enrichment.",
+    },
+    {
+        "name": "Analytics",
+        "description": "Fraud metrics, risk score distribution, and platform health analytics.",
+    },
+    {
+        "name": "Health",
+        "description": "Active readiness and liveness health probes for DB and external dependencies.",
+    },
+]
+
 app = FastAPI(
-    title=settings.PROJECT_NAME,
-    description=settings.PROJECT_DESCRIPTION,
+    title="SentriQ API",
+    description=(
+        "## Real-Time Transaction Risk & Fraud Rule Engine\n\n"
+        "SentriQ is an enterprise-grade backend system for real-time payment fraud detection, "
+        "rule evaluation, IP intelligence enrichment, and investigation case management."
+    ),
     version=settings.VERSION,
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    openapi_tags=tags_metadata,
     lifespan=lifespan,
 )
 
