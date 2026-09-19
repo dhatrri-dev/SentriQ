@@ -202,12 +202,20 @@ async def test_list_cases_paginated_structure(auth_client: AsyncClient):
 @pytest.mark.asyncio
 async def test_get_case_detail_scoped(auth_client: AsyncClient):
     """GET /cases/{case_id} returns the exact investigation case."""
-    # Seed case from /pending
-    list_res = await auth_client.get("/api/v1/cases/pending")
-    assert list_res.status_code == 200
-    cases = list_res.json()["items"]
-    assert len(cases) > 0
-    case_id = cases[0]["id"]
+    # Seed a high-risk transaction to guarantee at least one investigation case exists
+    seed_payload = {
+        "user_id": str(uuid4()),
+        "card_hash": "dead0000beef0000cafe0000face0000babe0000",
+        "amount": 9999.99,
+        "currency": "USD",
+        "ip_address": "198.51.100.77",
+        "location": {"latitude": 40.71, "longitude": -74.00, "country": "US"},
+        "timestamp": "2026-09-10T08:00:00Z"
+    }
+    seed_res = await auth_client.post("/api/v1/transactions/evaluate", json=seed_payload)
+    assert seed_res.status_code == 200
+    case_id = seed_res.json().get("case_id")
+    assert case_id is not None, "Expected a high-risk transaction to generate an investigation case"
 
     detail_res = await auth_client.get(f"/api/v1/cases/{case_id}")
     assert detail_res.status_code == 200

@@ -133,13 +133,22 @@ async def test_delete_blocklist_hard_and_soft(auth_client: AsyncClient):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_patch_case_partial_update(async_client: AsyncClient, auth_client: AsyncClient):
+async def test_patch_case_partial_update(auth_client: AsyncClient):
     """PATCH /cases/{case_id} updates case priority."""
-    list_res = await async_client.get("/api/v1/cases/pending")
-    assert list_res.status_code == 200
-    cases = list_res.json()["items"]
-    assert len(cases) > 0
-    case_id = cases[0]["id"]
+    # Seed a high-risk transaction to guarantee a pending case exists
+    seed_payload = {
+        "user_id": str(uuid4()),
+        "card_hash": "aaaa0000bbbb0000cccc0000dddd0000eeee0000",
+        "amount": 9500.00,
+        "currency": "USD",
+        "ip_address": "198.51.100.81",
+        "location": {"latitude": 37.77, "longitude": -122.41, "country": "US"},
+        "timestamp": "2026-09-10T09:00:00Z"
+    }
+    seed_res = await auth_client.post("/api/v1/transactions/evaluate", json=seed_payload)
+    assert seed_res.status_code == 200
+    case_id = seed_res.json().get("case_id")
+    assert case_id is not None, "Expected a high-risk transaction to generate a case"
 
     patch_res = await auth_client.patch(f"/api/v1/cases/{case_id}", json={"priority": "HIGH"})
     assert patch_res.status_code == 200
@@ -147,11 +156,22 @@ async def test_patch_case_partial_update(async_client: AsyncClient, auth_client:
 
 
 @pytest.mark.asyncio
-async def test_delete_resolved_case_integrity_constraint(async_client: AsyncClient, auth_client: AsyncClient):
+async def test_delete_resolved_case_integrity_constraint(auth_client: AsyncClient):
     """Attempting to DELETE a resolved case returns 400 Bad Request to preserve audit history."""
-    list_res = await async_client.get("/api/v1/cases/pending")
-    cases = list_res.json()["items"]
-    case_id = cases[0]["id"]
+    # Seed a high-risk transaction to guarantee a fresh pending case exists
+    seed_payload = {
+        "user_id": str(uuid4()),
+        "card_hash": "ffff0000aaaa0000bbbb0000cccc0000dddd0001",
+        "amount": 9800.00,
+        "currency": "USD",
+        "ip_address": "198.51.100.82",
+        "location": {"latitude": 51.50, "longitude": -0.12, "country": "GB"},
+        "timestamp": "2026-09-10T10:00:00Z"
+    }
+    seed_res = await auth_client.post("/api/v1/transactions/evaluate", json=seed_payload)
+    assert seed_res.status_code == 200
+    case_id = seed_res.json().get("case_id")
+    assert case_id is not None, "Expected a high-risk transaction to generate a case"
 
     # Resolve case first (requires auth)
     resolve_res = await auth_client.post(
